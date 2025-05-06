@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title> Real-Time DB </title>
+  <style>
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background: #111;
+      color: #eee;
+      /* margin: 0; */
+      padding: 2rem;
+    }
+
+    h1 {
+      margin-bottom: 2rem;
+      /*font-size: 2rem; /* 크기 고정 */
+      /*line-height: 1.5; /* 여백 설정 */
+      width: 500px;          /* 고정 너비 */
+      white-space: nowrap;   /* 한 줄 유지 */
+    }
+
+    .table-wrapper {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 2rem;
+    }
+
+    .table-block {
+      background: #1c1c1c;
+      padding: 1rem;
+      border-radius: 8px;
+      min-width: 300px;
+      max-width: 100%;
+      overflow-x: auto;
+    }
+
+    .table-block h2 {
+      margin-top: 0;
+      font-size: 1.2rem;
+      color: #0f0;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    th, td {
+      border: 1px solid #333;
+      padding: 0.5rem;
+      text-align: left;
+      white-space: nowrap;
+    }
+
+    th {
+      background: #333;
+    }
+
+    td {
+      background: #222;
+    }
+    
+    /* btn */
+    .my-btn {
+        background-color: #2c2c2c;
+        color: #ffffff;
+        font-weight: bold;
+        border: none;
+        padding: 0.6rem 1.2rem;
+        font-size: 1rem;
+        border-radius: 6px;
+        cursor: pointer;
+        transition: background-color 0.2s ease;
+        margin-top:1.2rem;
+        margin-bottom: 1.5rem;
+    }
+
+    .my-btn:hover {
+        background-color: #424242;
+        transform: scale(1.1);
+    }
+
+    /* header: h1 + btn */
+    .header {
+        display: flex;
+        align-items: center;
+        gap: 3rem; /* h1과 버튼 사이 여백 */
+        margin-bottom: 2rem;
+    }
+
+
+
+    /* sql excuter 판넬 */
+    .sql-panel {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        z-index: 999;
+        background: #1c1c1c;
+        border: 1px solid #444;
+        border-radius: 8px;
+        padding: 1rem;
+        width: 90%;
+        max-width: 600px;
+        box-shadow: 0 0 20px rgba(0, 255, 0, 0.3);
+        box-sizing: border-box;
+    }
+
+    .sql-panel textarea {
+        width: 97%;
+        height: 120px;
+        background: #000;
+        color: #0f0;
+        border: 1px solid #333;
+        border-radius: 4px;
+        padding: 0.5rem;
+        font-family: monospace;
+        resize: vertical;
+    }
+
+    .sql-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 0.5rem;
+        color: #0f0;
+    }
+
+    .sql-panel button {
+        margin-top: 0.5rem;
+        background: #333;
+        color: #fff;
+        border: none;
+        padding: 0.5rem 1rem;
+        border-radius: 4px;
+        cursor: pointer;
+    }
+
+    /* sql-오버레이 */
+    .sql-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.7);
+        z-index: 998;
+    }
+
+    /* sql 실행 여부 토스트트 */
+    .toast {
+        visibility: hidden;
+        min-width: 250px;
+        background-color: #0a0;
+        color: #fff;
+        text-align: center;
+        padding: 0.75rem 1rem;
+        border-radius: 4px;
+        position: fixed;
+        top: 1rem;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 1000;
+        opacity: 0;
+        transition: opacity 0.3s ease-in-out;
+    }
+    .toast.show {
+        visibility: visible;
+        opacity: 1;
+    }
+
+
+  </style>
+</head>
+<body>
+  <div class="header">
+      <h1> Real-Time DB </h1>
+      <button class = "my-btn" onclick="location.href='/'" style="background-color: rgb(0, 161, 224);">
+        View Database
+      </button>
+      <!-- <button class = "my-btn" onclick="location.href='/log.html'" style="color: #0ff"> -->
+      <button class = "my-btn" onclick="location.href='/log.html'">
+        View System Log
+      </button>
+      <!-- <button class = "my-btn" onclick="location.href='/history.html'" style="color: #ff9100"> -->
+      <button class = "my-btn" onclick="location.href='/history.html'">
+        View Event Histories
+      </button>
+      <button class = "my-btn" onclick="toggleSqlPanel()" style="background-color: rgba(21, 255, 0, 0.63);">
+        Execute SQL
+      </button>
+  </div>
+  <div class="table-wrapper" id="data-container">Loading...</div>
+
+
+
+  <!-- SQL 입력 패널 -->
+  <div id="sql-panel" class="sql-panel" style="display: none;">
+    <div class="sql-header">
+      <strong>SQL Query Executer</strong>
+      <button onclick="toggleSqlPanel()">✖</button>
+    </div>
+    <textarea id="sql-input" placeholder="ex: SELECT * FROM member;">update member set nickname='test' where email='user@email.com' returning *;</textarea>
+    <button onclick="sendSql()">확인</button>
+  </div>
+  
+  <!-- 토스트 메시지 -->
+  <div id="toast" class="toast">성공적으로 실행되었습니다!</div>
+
+  <!-- SQL 입력 패널 -> 어두운 배경 오버레이 -->
+  <div id="sql-overlay" class="sql-overlay" onclick="toggleSqlPanel()" style="display:none;"></div>
+
+
+  <!-- 지속적 업데이트 func -->
+  <script>
+    async function fetchData() {
+      try {
+        const res = await fetch('/data');
+        const data = await res.json();
+        const container = document.getElementById('data-container');
+        container.innerHTML = '';
+
+        for (const [tableName, rows] of Object.entries(data)) {
+          const block = document.createElement('div');
+          block.className = 'table-block';
+
+          let tableHTML = `<h2>${tableName}</h2>`;
+
+          if (Array.isArray(rows) && rows.length > 0) {
+            const headers = Object.keys(rows[0]);
+            tableHTML += `<table><thead><tr>${headers.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>`;
+            tableHTML += rows.map(row => {
+              return `<tr>${headers.map(h => `<td>${row[h]}</td>`).join('')}</tr>`;
+            }).join('');
+            tableHTML += `</tbody></table>`;
+          } else if (rows.error) {
+            tableHTML += `<p style="color: red;">Error: ${rows.error}</p>`;
+          } else {
+            tableHTML += `<p>No data</p>`;
+          }
+
+          block.innerHTML = tableHTML;
+          container.appendChild(block);
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    setInterval(fetchData, 100);
+    fetchData();
+
+    // fetch('/ip')
+    //   .then(response => response.json())
+    //   .then(data => {
+    //     const ip = data.ip; 
+    //     document.getElementById('h1').innerText = `Real-Time DB (${ip})`;
+    //   })
+    //   .catch(error => {
+    //     console.error('IP 가져오기 실패:', error);
+    //   });
+    fetch('/ip')
+      .then(res => res.text()) // JSON이면 .json(), 문자열이면 .text()
+      .then(ip => {
+        const h1 = document.querySelector('h1'); // id 없이 첫 번째 h1 선택
+        h1.innerText = `Real-Time DB (${ip})`;
+      })
+      .catch(err => console.error('IP 가져오기 실패:', err));
+  </script>
+
+
+
+<script>
+    function toggleSqlPanel() { // 오버레이 적용 후
+        const panel = document.getElementById("sql-panel");
+        const overlay = document.getElementById("sql-overlay");
+        const isVisible = panel.style.display === "block";
+
+        panel.style.display = isVisible ? "none" : "block";
+        if (overlay) overlay.style.display = isVisible ? "none" : "block";
+    }
+  
+    async function sendSql() {
+      const query = document.getElementById("sql-input").value;
+      if (!query.trim()) return;
+  
+      const res = await fetch('/execute-sql', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query:query }) // 작성한 sql query string 전달
+      });
+  
+      if (res.ok) {
+        showToast("SQL 실행 성공!");
+        const data = await res.json();
+        console.log(data.result.rows);
+      } else {
+        showToast("실행 실패!", true);
+      }
+    }
+
+    // Ctrl + Enter 로 query 전송
+    document.getElementById("sql-input").addEventListener("keydown", (e) => {
+        if (e.ctrlKey && e.key === "Enter") {
+            sendSql();  // Ctrl+Enter 입력 시 SQL 전송
+        }
+    });
+
+    // ESC로 창 닫음
+    // document.getElementById("sql-input").addEventListener("keydown", (e)=>{
+    //     if(e.key === "Escape"){
+    //         toggleSqlPanel();
+    //     }
+    // });
+    // 전역 적용
+    document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") {
+            const panel = document.getElementById("sql-panel");
+            if (panel.style.display === "block") {
+                toggleSqlPanel();
+            }
+        }
+    });
+
+    // Tab 시 log 탭으로
+    document.addEventListener("keydown", (e) => {
+        if (e.key === "Tab") {
+            // const panel = document.getElementById("sql-panel");
+            // if (panel.style.display === "block") {
+            //     toggleSqlPanel();
+            // }
+            location.href='/log.html'
+        }
+    });
+    // Shift Tab 시 history 탭으로
+    document.addEventListener("keydown", (e) => {
+        if (e.key === "Tab" && e.shiftKey) {
+            location.href='/history.html'
+        }
+    });
+
+  
+    function showToast(msg, error = false) {
+      const toast = document.getElementById("toast");
+      toast.innerText = msg;
+      toast.style.backgroundColor = error ? '#c00' : '#0a0';
+      toast.classList.add("show");
+      setTimeout(() => toast.classList.remove("show"), 3000);
+    }
+</script>
+  
+</body>
+</html>
