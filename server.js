@@ -2,11 +2,24 @@ const express = require('express');
 const { Pool } = require('pg');
 const cors = require('cors');
 const path = require('path');
-const { db, tablesToWatch } = require('./config');
+const {getConfig, postConfig} = require("./sqlite");
 
 const app = express();
-const pool = new Pool(db);
-const PORT = 5001;
+const PORT = 5000;
+
+let currentTablesToWatch;
+let curruntTablesToWatchInNewPage;
+let dbPassword;
+let dbHost;
+
+(async () => { // dbconfig data (from sqlite)
+  const { db, tablesToWatch, tablesToWatchInNewPage } = await getConfig();
+  pool = new Pool(db);
+  dbPassword = db.password;
+  dbHost = db.host;
+  currentTablesToWatch = [...tablesToWatch];
+  curruntTablesToWatchInNewPage = tablesToWatchInNewPage;
+})();
 
 app.use(cors());
 app.use(express.static('public/dist')); // index.html
@@ -16,22 +29,39 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));  
 
 app.get("/ip", (req,res)=>{
-  res.send(db.host);
+  res.send(dbHost);
 });
-
 
 app.get('/data', async (req, res) => {
   const result = {};
 
-  for (let table of tablesToWatch) {
+  for (let table of currentTablesToWatch) {
     try {
-        let query;
-        if(table.includes("channel"))
-            query = `SELECT * FROM "${table}" ORDER BY id ASC;`;
-        else if (table==="member")
-            query = `SELECT * FROM "${table}" ORDER BY admin DESC, email ASC;`;
-        else
-            query = `SELECT * FROM "${table}";`;
+        let query = `SELECT * FROM "${table}" ;`;
+        if(table.includes("/")){ // 정렬 시 기준 column 이름 '/' 로 구분하여 전달
+          const t = table.split("/");
+          for(let i=0; i<t.length; i++){ // 다중 조건 정렬 가능
+            if(i==0){
+              query = `SELECT * FROM "${t[i]}" `;
+            }else{ 
+              let sort = "ASC";
+              let column = t[i];
+
+              // column 이름 앞에 * 붙이면 DESC, 기본 ASC
+              if(t[i].startsWith("*")){
+                sort = "DESC";
+                column = t[i].slice(1);
+              }
+
+              if(i==1)
+                query+=`ORDER BY ${column} ${sort} `;
+              else
+                query+=`, ${column} ${sorrt} `;
+            }
+          }
+          query+=";";
+        }
+
       const { rows } = await pool.query(query);
       result[table] = rows;
     } catch (err) {
@@ -42,31 +72,6 @@ app.get('/data', async (req, res) => {
   res.json(result);
 });
 
-
-// app.get('/systemlog', async (req, res) => {
-//     const { page = 1, limit = 20 } = req.query;
-//     const offset = (page - 1) * limit;
-//     const result = {
-//       rows: [],
-//       total: 0
-//     };
-  
-//     try {
-//       const countQuery = `SELECT COUNT(*) FROM private.systemlog`;
-//     //   const dataQuery = `SELECT idx, process, message, to_char(time AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS.MS') time FROM private.systemlog ORDER BY idx DESC LIMIT $1 OFFSET $2`;
-//       const dataQuery = `SELECT idx, process, message, to_char(time, 'YYYY-MM-DD HH24:MI:SS.MS') time FROM private.systemlog ORDER BY idx DESC LIMIT $1 OFFSET $2`;
-  
-//       const countResult = await pool.query(countQuery);
-//       const dataResult = await pool.query(dataQuery, [limit, offset]);
-  
-//       result.total = parseInt(countResult.rows[0].count);
-//       result.rows = dataResult.rows;
-  
-//       res.json(result);
-//     } catch (err) {
-//       res.status(500).json({ error: err.message });
-//     }
-// });
 
 app.get('/get-table', async (req, res) => {
   const { page = 1, limit = 20, table, primary } = req.query;
@@ -164,7 +169,52 @@ app.post('/execute-sql', async (req, res) => {
       res.status(400).send('Query failed: ' + err);
     }
 });
-  
+
+
+app.post('/update-config', async (req, res) => {
+  // console.log("config update API 호출");
+  const { dbConfig, tablesToWatch, tablesToWatchInNewPage } = req.body;
+  // console.log(dbConfig);
+  try {
+    // 기존 pool 종료
+    await pool.end();
+    // 새로운 연결
+    pool = new Pool(dbConfig);
+    await pool.query('SELECT 1'); // 연결 테스트
+
+    tabesToWatchString = tablesToWatch.join(",");
+    postConfig(dbConfig, tabesToWatchString, tablesToWatchInNewPage)
+    .then(res => console.log("SQLITE dbconfig updated:", res))
+    .catch(err => console.error("SQLITE dbconfig update failed:", err));
+
+    // 업데이트 반영
+    currentTablesToWatch = tablesToWatch;
+    curruntTablesToWatchInNewPage = tablesToWatchInNewPage;
+    res.json({ message: 'Config updated successfully' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Failed to update config', error: err.message });
+  }
+});
+
+// 필요시 현재 설정 확인
+app.get('/config', (req, res) => {
+  // res.json({ dbConfig: pool.options, tablesToWatch: currentTablesToWatch });
+  res.json({
+    dbConfig: {
+      host: pool.options.host,
+      port: pool.options.port,
+      user: pool.options.user,
+      database: pool.options.database,
+      password: dbPassword,
+    },
+    tablesToWatch: currentTablesToWatch,
+    tablesToWatchInNewPage: curruntTablesToWatchInNewPage,
+  });
+});
+
+
+
 
 // 남은 모든 요청(= static 파일로 매칭 안 된 요청)은 index.html로
 app.use((req, res, next) => {

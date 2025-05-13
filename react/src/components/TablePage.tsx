@@ -41,7 +41,7 @@ export default function DataPanel() {
     <Wrapper>
       {Object.entries(data).map(([tableName, rows]) => (
         <TableBlock key={tableName}>
-          <TableTitle>{tableName}</TableTitle>
+          <TableTitle>{tableName.split("/")[0]}</TableTitle>
           {Array.isArray(rows) && rows.length > 0 ? (
             <StyledTable>
               <thead>

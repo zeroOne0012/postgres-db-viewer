@@ -22,6 +22,7 @@ export default function SingleTable({table, primary}:SignleTableProps) {
   const [page, setPage] = useState(1);
 
   const [isLoading, setIsLoading] = useState(true);
+  const [isError, setIsError] = useState(false);
 
   const totalPages = Math.ceil(total / limit);
   const maxPagesShown = 10;
@@ -35,8 +36,10 @@ export default function SingleTable({table, primary}:SignleTableProps) {
       });
       setRows(res.data.rows);
       setTotal(res.data.total);
+      setIsError(false);
     } catch (err) {
-      console.error("failed to load data:", err);
+      // console.error("failed to load data:", err);
+      setIsError(true);
     } finally{
       setIsLoading(false);
     }
@@ -74,11 +77,10 @@ useEffect(() => {
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [page, totalPages]);
 
-  if (isLoading) {
-    return <Container>Loading...</Container>;
-  }
+  if (isLoading) return <Container>Loading...</Container>;
+  if (isError) return <Container>Failed To Get Data</Container>;
   if (!isLoading && rows.length===0) return <Container>No Data</Container>;
-
+  
   const headers = Object.keys(rows[0] || {});
 
   return (
