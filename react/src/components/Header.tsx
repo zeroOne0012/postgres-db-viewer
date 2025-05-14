@@ -2,33 +2,18 @@ import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import axios from 'axios';
 import { useLocation, useNavigate } from 'react-router-dom';
-
 import {BASE_URL} from "../api/config";
 import ConfigPanel from './ConfigPanel';
 import { useConfigStore } from '../store/configStore'; 
-import ToastContainer, { ToastMessage } from './ToastContainer';
+import ToastContainer from './ToastContainer';
+import { useToastStore } from '../store/toastStore';
 
 export default function(){
   const urlLocation = useLocation();  // 현재 경로 추적
   const navigate = useNavigate();  // navigate 사용
   const [ip, setIp] = useState<string>("localhost");
-  const [isSqlPanelVisible, setIsSqlPanelVisible] = useState<boolean>(false);
-  const [isConfigVisible, setIsConfigVisible] = useState(false); // config 창
-  const { tableRoutes } = useConfigStore(); // for menu buttons
-  const [toasts, setToasts] = useState<ToastMessage[]>([]);
-
-  const addToast = (message: string, isOk: boolean) => {
-    const id = Date.now();
-    setToasts(prev => [...prev, { id, message, isOk }]);
-    setTimeout(() => {
-      setToasts(prev => prev.filter(t => t.id !== id));
-    }, 3000);
-  };
-
-  const removeToast = (id: number) => {
-    setToasts(prev => prev.filter(toast => toast.id !== id));
-  };
-
+  const { isSqlPanelVisible, setIsSqlPanelVisible, isConfigVisible, setIsConfigVisible, tableRoutes, isInsertPanelVisible, setTableRoutes } = useConfigStore(); // for panels & menu buttons
+  const { toasts, addToast, removeToast } = useToastStore();
 
   const getTitle = () => {
     if (urlLocation.pathname === "/") {
@@ -48,9 +33,6 @@ export default function(){
     return "Real-Time DB";
   };
 
-  // const toggleSqlPanel = () => {
-  //   setIsSqlPanelVisible((prevState) => !prevState);
-  // };
 
   const sendSql = async () => {
     const query = (document.getElementById("sql-input") as HTMLTextAreaElement).value;
@@ -83,14 +65,16 @@ export default function(){
   // SQL / DB 패널 열기 단축키
   useEffect(()=>{
     const handleKey = (e: KeyboardEvent) =>{
-      if (!isConfigVisible&&!isSqlPanelVisible&&(e.key === 'e' || e.key === 'E')) {
-        e.preventDefault(); // 브라우저 기본 동작 막음
-        setIsSqlPanelVisible(true);
-        return;
-      } else if(!isConfigVisible&&!isSqlPanelVisible&&(e.key === 'd' || e.key === 'D')){
-        e.preventDefault(); // 브라우저 기본 동작 막음
-        setIsConfigVisible(true);
-        return;
+      if(!isConfigVisible&&!isSqlPanelVisible){
+        if (e.ctrlKey && (e.key === 'e' || e.key === 'E')) {
+          e.preventDefault(); // 브라우저 기본 동작 막음
+          setIsSqlPanelVisible(true);
+          return;
+        } else if(e.ctrlKey && (e.key === 'd' || e.key === 'D')){
+          e.preventDefault(); // 브라우저 기본 동작 막음
+          setIsConfigVisible(true);
+          return;
+        }
       }
     };
     document.addEventListener('keydown', handleKey);
@@ -125,7 +109,7 @@ export default function(){
   // Tab / Shift+Tab으로 탭 전환
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (isConfigVisible||isSqlPanelVisible) return; // !! ConfigPanel 열려 있으면 페이지 전환 금지
+      if (isConfigVisible||isSqlPanelVisible||isInsertPanelVisible) return; // !! ConfigPanel 열려 있으면 페이지 전환 금지
 
       const staticPaths = ['/'];
       const dynamicPaths = tableRoutes.map(r => r.path);
@@ -146,8 +130,26 @@ export default function(){
   
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [urlLocation.pathname, navigate, isConfigVisible, tableRoutes]);
+  }, [urlLocation.pathname, navigate, isConfigVisible, isSqlPanelVisible, tableRoutes, isInsertPanelVisible]);
   
+    useEffect(() => {
+    axios.get(`${BASE_URL}/config`)
+      .then(res => {
+        const { tablesToWatchInNewPage } = res.data;
+
+        const parsedRoutes = tablesToWatchInNewPage
+        .split(',')
+        .map((s:string) => s.trim())
+        .map((entry:string) => {
+          let [path, table, primary, button] = entry.split('/');
+          path = "/"+path;
+          return { path, table, primary, button };
+        })
+        .filter((r:{ path: string; table: string; primary: string; button: string }) => r.path && r.table && r.primary && r.button);
+        setTableRoutes(parsedRoutes);
+      })
+      .catch(err => console.error('초기 설정값 불러오기 실패:', err));
+  }, []); // isOpen이 true일 때마다 실행됨
 
   return (
     <HeaderWrapper>
@@ -168,7 +170,6 @@ export default function(){
           {button}
         </Button>
       ))}
-      {/* <Button bgColor="rgba(21, 255, 0, 0.63)" onClick={toggleSqlPanel}>Execute SQL</Button> */}
       <Button bgColor="rgba(21, 255, 0, 0.63)" onClick={()=>setIsSqlPanelVisible(true)}>Execute SQL</Button>
 
       <Button bgColor="rgb(199, 202, 0)" onClick={() => setIsConfigVisible(true)}>DB Config</Button>
@@ -201,17 +202,13 @@ export default function(){
           <strong>SQL Query Executer</strong>
           <SqlButton onClick={()=>setIsSqlPanelVisible(false)}>X</SqlButton>
         </SqlHeader>
-        {/* <SqlTextArea placeholder='ex: SELECT now();'>update member set nickname='test' where email='user1@nsk.com' returning *;</SqlTextArea> */}
         <SqlTextArea id="sql-input" placeholder='ex: SELECT now();'/>
         <SqlButton onClick={sendSql}>확인</SqlButton>
       </SqlPanel>
       <Overlay isVisible={isSqlPanelVisible} onClick={()=>setIsSqlPanelVisible(false)}/>
-      {/* <Toast isOk = {isOk} isVisible={toastMessage !== ""}>{toastMessage}</Toast>  */}
     </HeaderWrapper>
   );
 };
-
-// export default Header;
 
 
 const HeaderWrapper = styled.div`
@@ -298,22 +295,6 @@ const SqlButton = styled.button`
   cursor: pointer;
 `;
 
-// const Toast = styled.div<{ isVisible: boolean, isOk: boolean }>`
-//   visibility: ${(props) => (props.isVisible ? 'visible' : 'hidden')};
-//   opacity: ${(props) => (props.isVisible ? 1 : 0)};
-//   min-width: 250px;
-//   background-color: ${(props)=>(props.isOk ? "#0a0":"#c00")};
-//   color: #fff;
-//   text-align: center;
-//   padding: 0.75rem 1rem;
-//   border-radius: 4px;
-//   position: fixed;
-//   top: 1rem;
-//   left: 50%;
-//   transform: translateX(-50%);
-//   z-index: 1000;
-//   transition: opacity 0.3s ease-in-out;
-// `;
 
 const Overlay = styled.div<{ isVisible: boolean }>`
   position: fixed;
@@ -325,9 +306,6 @@ const Overlay = styled.div<{ isVisible: boolean }>`
   z-index: 998;
   display: ${(props) => (props.isVisible ? 'block' : 'none')};
 `;
-
-
-
 
 
 const ConfigPanelWrapper = styled.div`

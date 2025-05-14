@@ -23,7 +23,7 @@ export default function ToastContainer({ toasts, removeToast }: ToastContainerPr
   return (
     <Wrapper>
       {toasts.map((toast) => (
-        <Toast key={toast.id} isOk={toast.isOk}>{toast.message}</Toast>
+        <Toast key={toast.id} isOk={toast.isOk} onClick={()=>removeToast(toast.id)}>{toast.message}</Toast>
       ))}
     </Wrapper>
   );

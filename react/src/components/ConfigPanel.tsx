@@ -10,8 +10,9 @@ interface ConfigPanelProps {
 }
 
 export default function ConfigPanel({ onToast, onIpUpdate }: ConfigPanelProps) {
-    const { dbConfig, tablesToWatch, tableRoutes, setDbConfig, setTablesToWatch, setTableRoutes } = useConfigStore();
-//   const [form, setForm] = useState(dbConfig); // 장상 작동 안함
+  const { dbConfig, tablesToWatch, tableRoutes, setDbConfig, setTablesToWatch, setTableRoutes } = useConfigStore();
+  const [tableList, setTableList] = useState('');
+  const [tableRouteList, setTableRouteList] = useState('');
   const [form, setForm] = useState({
     host: '',
     port: 5432,
@@ -19,13 +20,8 @@ export default function ConfigPanel({ onToast, onIpUpdate }: ConfigPanelProps) {
     password: '',
     database: '',
   });
-  const [tableList, setTableList] = useState('');
-  const [tableRouteList, setTableRouteList] = useState('');
-//   const [message, setMessage] = useState('');
 
-  // const handleRoutesChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-  //   setTableRoutesRaw(e.target.value);
-  // };
+
 
   useEffect(() => {
     axios.get(`${BASE_URL}/config`)

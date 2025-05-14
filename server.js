@@ -2,6 +2,7 @@ const express = require('express');
 const { Pool } = require('pg');
 const cors = require('cors');
 const path = require('path');
+// const { db, tablesToWatch, tablesToWatchInNewPage } = require('./config');
 const {getConfig, postConfig} = require("./sqlite");
 
 const app = express();
@@ -11,6 +12,7 @@ let currentTablesToWatch;
 let curruntTablesToWatchInNewPage;
 let dbPassword;
 let dbHost;
+let pool;
 
 (async () => { // dbconfig data (from sqlite)
   const { db, tablesToWatch, tablesToWatchInNewPage } = await getConfig();
@@ -62,6 +64,12 @@ app.get('/data', async (req, res) => {
           query+=";";
         }
 
+        // if(table.includes("channel"))
+        //   query = `SELECT * FROM "${table}" ORDER BY id ASC;`;
+        // else if (table==="member")
+        //   query = `SELECT * FROM "${table}" ORDER BY admin DESC, email ASC;`;
+        // else
+        //   query = `SELECT * FROM "${table}";`;
       const { rows } = await pool.query(query);
       result[table] = rows;
     } catch (err) {
@@ -72,6 +80,31 @@ app.get('/data', async (req, res) => {
   res.json(result);
 });
 
+
+// app.get('/systemlog', async (req, res) => {
+//     const { page = 1, limit = 20 } = req.query;
+//     const offset = (page - 1) * limit;
+//     const result = {
+//       rows: [],
+//       total: 0
+//     };
+  
+//     try {
+//       const countQuery = `SELECT COUNT(*) FROM private.systemlog`;
+//     //   const dataQuery = `SELECT idx, process, message, to_char(time AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS.MS') time FROM private.systemlog ORDER BY idx DESC LIMIT $1 OFFSET $2`;
+//       const dataQuery = `SELECT idx, process, message, to_char(time, 'YYYY-MM-DD HH24:MI:SS.MS') time FROM private.systemlog ORDER BY idx DESC LIMIT $1 OFFSET $2`;
+  
+//       const countResult = await pool.query(countQuery);
+//       const dataResult = await pool.query(dataQuery, [limit, offset]);
+  
+//       result.total = parseInt(countResult.rows[0].count);
+//       result.rows = dataResult.rows;
+  
+//       res.json(result);
+//     } catch (err) {
+//       res.status(500).json({ error: err.message });
+//     }
+// });
 
 app.get('/get-table', async (req, res) => {
   const { page = 1, limit = 20, table, primary } = req.query;
@@ -171,15 +204,30 @@ app.post('/execute-sql', async (req, res) => {
 });
 
 
+let isPoolEnded = false;
+let isEnding = false;
+
 app.post('/update-config', async (req, res) => {
   // console.log("config update API 호출");
   const { dbConfig, tablesToWatch, tablesToWatchInNewPage } = req.body;
   // console.log(dbConfig);
   try {
-    // 기존 pool 종료
-    await pool.end();
+    // 동시 요청 방지
+    if (isEnding) {
+      return res.status(429).json({ message: 'Pool is currently being reconfigured. Please try again shortly.' });
+    }
+    
+    isEnding = true;
+
+    if (!isPoolEnded) {
+      await pool.end(); // 이전 pool 종료
+      isPoolEnded = true;
+    }
+
     // 새로운 연결
     pool = new Pool(dbConfig);
+    isPoolEnded = false;
+
     await pool.query('SELECT 1'); // 연결 테스트
 
     tabesToWatchString = tablesToWatch.join(",");
@@ -194,6 +242,8 @@ app.post('/update-config', async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Failed to update config', error: err.message });
+  } finally {
+    isEnding = false; // 플래그 해제
   }
 });
 
@@ -213,8 +263,156 @@ app.get('/config', (req, res) => {
   });
 });
 
+// 수정 (PUT /row)
+app.put('/row', async (req, res) => {
+  const { table, old, row } = req.body;
+  if (!table || !old || !row) return res.status(400).json({ error: 'Invalid request' });
+
+  const fields = Object.keys(row);
+  const setClause = fields.map((key, i) => `"${key}" = $${i + 1}`).join(', ');
+  const setValues = fields.map((key) => row[key]);
+
+  const whereKeys = Object.keys(old);
+  let whereClauseParts = [];
+  let whereValues = [];
+  let paramIndex = fields.length + 1;
+
+  whereKeys.forEach((key) => {
+    if (old[key] === null || old[key] === undefined) {
+      whereClauseParts.push(`"${key}" IS NULL`);
+    } else {
+      whereClauseParts.push(`"${key}" = $${paramIndex++}`);
+      whereValues.push(old[key]);
+    }
+  });
+
+  const sql = `UPDATE "${table}" SET ${setClause} WHERE ${whereClauseParts.join(' AND ')}`;
+  const values = [...setValues, ...whereValues];
+
+  // console.log("update sql:", sql);
+  // console.log("values:", values);
+
+  try {
+    const result = await pool.query(sql, values);
+    res.json({ updated: result.rowCount });
+  } catch (err) {
+    console.error("Update failed:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 삭제 (DELETE /row)
+app.delete('/row', async (req, res) => {
+  const { table, rows } = req.body;
+
+  if (!table || !Array.isArray(rows) || rows.length === 0) {
+    return res.status(400).json({ error: 'Invalid request' });
+  }
+
+  const keys = Object.keys(rows[0]); // 모든 row가 같은 구조라고 가정
+  const conditions = [];
+  const values = [];
+  let paramIndex = 1;
+
+  rows.forEach((row) => {
+    const clause = keys.map((key) => {
+      if (row[key] === null || row[key] === undefined) {
+        return `"${key}" IS NULL`;
+      } else {
+        values.push(row[key]);
+        return `"${key}" = $${paramIndex++}`;
+      }
+    }).join(' AND ');
+    conditions.push(`(${clause})`);
+  });
+
+  const sql = `DELETE FROM "${table}" WHERE ${conditions.join(' OR ')}`;
+  // console.log("delete sql:", sql);
+  // console.log("values:", values);
+
+  try {
+    const result = await pool.query(sql, values);
+    res.json({ deleted: result.rowCount });
+  } catch (err) {
+    console.error('Delete failed:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 
+// POST /row
+// app.post('/row', async (req, res) => {
+//   const { table, row } = req.body;
+//   if (!table || !row || typeof row !== 'object') {
+//     return res.status(400).json({ error: 'Invalid request' });
+//   }
+
+//   const keys = Object.keys(row);
+//   const placeholders = keys.map((_, i) => `$${i + 1}`).join(', ');
+//   const values = keys.map((key) => row[key]);
+
+//   const sql = `INSERT INTO ${table} (${keys.join(', ')}) VALUES (${placeholders}) RETURNING *`;
+//   // console.log(sql,values);
+
+//   try {
+//     const result = await pool.query(sql, values);
+//     res.json({ inserted: result.rows[0] });
+//   } catch (err) {
+//     res.status(500).json({ error: err.message });
+//   }
+// });
+
+
+app.post('/row', async (req, res) => {
+  const { table, rows } = req.body;
+
+  if (!table || !Array.isArray(rows) || rows.length === 0) {
+    return res.status(400).json({ error: 'Invalid request' });
+  }
+
+  const fields = Object.keys(rows[0]);
+  const placeholders = fields.map((_, i) => `$${i + 1}`).join(', ');
+  const sql = `INSERT INTO ${table} (${fields.join(', ')}) VALUES (${placeholders})`;
+
+  try {
+    const client = await pool.connect();
+
+    for (const row of rows) {
+      const values = fields.map((f) => row[f]);
+      await client.query(sql, values);
+    }
+
+    client.release();
+    res.json({ inserted: rows.length });
+  } catch (err) {
+    console.error('Insert failed:', err);
+    res.status(500).json({ error: `Insert failed: ${err}` });
+  }
+});
+
+
+app.get("/columns", async (req, res, next) => {
+  const table = req.query.table;
+  if (!table) return res.status(400).json({ error: "Missing table parameter" });
+
+  try {
+    const result = await pool.query(`
+      SELECT column_name
+      FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = $1
+      ORDER BY ordinal_position
+    `, [table]);
+
+    const columnNames = result.rows.map(r => r.column_name);
+    res.json(columnNames);
+  } catch (err) {
+    next(err);
+  }
+});
+
+
+//--------------------------------------------//
+  
 
 // 남은 모든 요청(= static 파일로 매칭 안 된 요청)은 index.html로
 app.use((req, res, next) => {

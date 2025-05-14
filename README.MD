@@ -5,6 +5,6 @@
 shortcut
 - 탭 전환: Tab / Shift + Tab
 - 페이지 전환: <- / ->
-- Execute SQL: e / ESC
+- Execute SQL: Ctrl + e / ESC
     - 쿼리 실행: Ctrl + Enter
-- DB Config: d / ESC
+- DB Config: Ctrl + d / ESC

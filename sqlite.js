@@ -30,7 +30,7 @@ db.serialize(() => {
                 (user, host, database, password, port, tables1, tables2) 
             VALUES
                 (?, ?, ?, ?, ?, ?, ?)`);
-        stmt.run("postgres","localhost","mydb","0000",5432,"member,article", "logs/private.system_log/idx/View Logs, events/history/idx/View Events");
+        stmt.run("postgres","localhost","mydb","0000",5432,"member/idx,article/*idx", "logs/private.system_log/idx/View Logs, events/history/idx/View Events");
         stmt.finalize();
     }
   });
