@@ -7,7 +7,7 @@ const {getConfig, postConfig} = require("./sqlite");
 
 const app = express();
 const PORT = 5000;
-
+ 
 let currentTablesToWatch;
 let curruntTablesToWatchInNewPage;
 let dbPassword;
